@@ -229,6 +229,47 @@ function Get-ChromeVersion {
     return ""
 }
 
+function Get-DownloadSpeedMbps {
+    try {
+        $url     = "https://speed.cloudflare.com/__down?bytes=5242880"  # 5 MB
+        $tmpFile = "$env:TEMP\moby_speedtest.tmp"
+        $wc      = New-Object System.Net.WebClient
+        $sw      = [System.Diagnostics.Stopwatch]::StartNew()
+        $wc.DownloadFile($url, $tmpFile)
+        $sw.Stop()
+        $bytes = (Get-Item $tmpFile -EA SilentlyContinue).Length
+        Remove-Item $tmpFile -Force -EA SilentlyContinue
+        if ($bytes -gt 0 -and $sw.Elapsed.TotalSeconds -gt 0) {
+            return [math]::Round(($bytes * 8 / 1000000) / $sw.Elapsed.TotalSeconds, 1)
+        }
+    } catch {}
+    return 0
+}
+
+function Get-PingStats([string]$target, [int]$count = 10) {
+    $results = Test-Connection -ComputerName $target -Count $count -EA SilentlyContinue
+    $ok      = @($results | Where-Object { $_.StatusCode -eq 0 -or $_.Status -eq "Success" })
+    $lost    = $count - $ok.Count
+    $lossPct = [math]::Round(($lost / $count) * 100, 0)
+    $times   = $ok | ForEach-Object {
+        if ($_.ResponseTime -ne $null) { $_.ResponseTime }
+        elseif ($_.Latency  -ne $null) { $_.Latency }
+    }
+    $avg = if ($times) { [math]::Round(($times | Measure-Object -Average).Average, 0) } else { 0 }
+    $min = if ($times) { ($times | Measure-Object -Minimum).Minimum } else { 0 }
+    $max = if ($times) { ($times | Measure-Object -Maximum).Maximum } else { 0 }
+    return [pscustomobject]@{
+        Target   = $target
+        Sent     = $count
+        Lost     = $lost
+        LossPct  = $lossPct
+        AvgMs    = $avg
+        MinMs    = $min
+        MaxMs    = $max
+        Reachable = ($ok.Count -gt 0)
+    }
+}
+
 function Get-LastBackupDate([string]$backupPath) {
     if (-not (Test-Path $backupPath)) { return "" }
     $last = Get-ChildItem $backupPath -Directory -EA SilentlyContinue |
@@ -300,6 +341,30 @@ foreach ($a in $adapters) {
     $min = if ($isW) { 10 } else { $REQ_NET_MBITS }
     if ($m -ge $min) { $redeOk = $true; break }
 }
+
+# Configuração IP do adaptador principal (que tem gateway)
+$netCfg    = Get-NetIPConfiguration -EA SilentlyContinue |
+             Where-Object { $_.IPv4DefaultGateway -ne $null } |
+             Select-Object -First 1
+$ipAddr    = if ($netCfg) { $netCfg.IPv4Address.IPAddress }       else { "N/A" }
+$ipGW      = if ($netCfg) { $netCfg.IPv4DefaultGateway.NextHop }  else { "N/A" }
+$ipDNS     = if ($netCfg) {
+    ($netCfg.DNSServer | Where-Object { $_.AddressFamily -eq 2 } |
+     Select-Object -ExpandProperty ServerAddresses) -join " / "
+} else { "N/A" }
+$ipSubnet  = if ($netCfg) { $netCfg.IPv4Address.PrefixLength } else { "N/A" }
+
+# Ping - latência e estabilidade
+Write-Host "         Executando testes de rede (ping + velocidade)..." -ForegroundColor DarkGray
+$ping8888  = Get-PingStats "8.8.8.8"   10
+$pingGW    = Get-PingStats $ipGW        5
+
+# Velocidade de download real
+Write-Host "         Medindo velocidade de internet (5 MB)..." -ForegroundColor DarkGray
+$downloadMbps = Get-DownloadSpeedMbps
+
+# Tracert (captura apenas, exibe no TXT)
+$tracertOut = (tracert -h 15 -w 1000 8.8.8.8 2>&1) -join "`n"
 
 # Chrome versão
 $chromeOk = $false
@@ -417,6 +482,54 @@ foreach ($a in $adapters) {
     else                   { FAIL "${tipo}: $mbps Mbps insuficiente (mínimo $minReq Mbps)" }
 }
 
+Head "11. DIAGNÓSTICO DE REDE"
+
+# Configuração IP
+INF "IP Local    : $ipAddr / $ipSubnet"
+INF "Gateway     : $ipGW"
+INF "DNS         : $ipDNS"
+
+# Ping Gateway (rede interna)
+INF ""
+INF "── Ping Gateway ($ipGW) ──────────────────────"
+if ($pingGW.Reachable) {
+    INF "Latência    : avg ${$pingGW.AvgMs}ms  |  min ${$pingGW.MinMs}ms  |  max ${$pingGW.MaxMs}ms"
+    INF "Perda       : $($pingGW.LossPct)%  ($($pingGW.Lost)/$($pingGW.Sent) pacotes)"
+    if    ($pingGW.LossPct -gt 0)    { FAIL "Perda de pacotes na rede interna: $($pingGW.LossPct)%" }
+    elseif($pingGW.AvgMs   -gt 50)   { WARN "Latência alta para o gateway: $($pingGW.AvgMs)ms" }
+    else                              { OK   "Gateway OK — latência $($pingGW.AvgMs)ms, sem perda" }
+} else {
+    FAIL "Gateway $ipGW inacessível — verifique cabeamento/switch"
+}
+
+# Ping Internet (8.8.8.8)
+INF ""
+INF "── Ping Internet (8.8.8.8) ───────────────────"
+if ($ping8888.Reachable) {
+    INF "Latência    : avg $($ping8888.AvgMs)ms  |  min $($ping8888.MinMs)ms  |  max $($ping8888.MaxMs)ms"
+    INF "Perda       : $($ping8888.LossPct)%  ($($ping8888.Lost)/$($ping8888.Sent) pacotes)"
+    if    ($ping8888.LossPct -gt 5)  { FAIL "Perda de pacotes alta: $($ping8888.LossPct)% — instabilidade na internet" }
+    elseif($ping8888.LossPct -gt 0)  { WARN "Perda leve: $($ping8888.LossPct)% — monitorar" }
+    elseif($ping8888.AvgMs   -gt 150){ WARN "Latência elevada: $($ping8888.AvgMs)ms" }
+    elseif($ping8888.AvgMs   -gt 80) { WARN "Latência moderada: $($ping8888.AvgMs)ms" }
+    else                              { OK   "Internet estável — $($ping8888.AvgMs)ms avg, $($ping8888.LossPct)% perda" }
+} else {
+    FAIL "8.8.8.8 inacessível — sem internet ou DNS bloqueado"
+}
+
+# Velocidade de download
+INF ""
+INF "── Velocidade de Internet ────────────────────"
+if ($downloadMbps -gt 0) {
+    INF "Download    : $downloadMbps Mbps"
+    if    ($downloadMbps -ge 50) { OK   "Download excelente: $downloadMbps Mbps" }
+    elseif($downloadMbps -ge 20) { OK   "Download adequado: $downloadMbps Mbps" }
+    elseif($downloadMbps -ge 10) { WARN "Download no limite: $downloadMbps Mbps (mínimo 10 Mbps)" }
+    else                         { FAIL "Download insuficiente: $downloadMbps Mbps (mínimo 10 Mbps)" }
+} else {
+    WARN "Não foi possível medir a velocidade de download"
+}
+
 # ============================================================
 #  CHECKLIST FINAL
 # ============================================================
@@ -432,6 +545,10 @@ $checks = [ordered]@{
     "FCerta localizado"      = ($null -ne $fcertaRoot)
     "Banco de dados (.ib)"   = ($dbPath -ne "")
     "Rede suficiente"        = $redeOk
+    "Internet acessível"     = $ping8888.Reachable
+    "Sem perda de pacotes"   = ($ping8888.LossPct -eq 0)
+    "Latência aceitável"     = ($ping8888.AvgMs -le 150 -and $ping8888.Reachable)
+    "Velocidade internet"    = ($downloadMbps -ge 10)
 }
 
 if ($isServer) {
@@ -500,6 +617,11 @@ Banco de Imagem: $imSize
 Pasta FCerta: $fcertaRoot
 Disco livre (C:): $diskFreeGB GB
 
+Rede Local:
+  IP: $ipAddr / $ipSubnet  |  Gateway: $ipGW  |  DNS: $ipDNS
+  Ping Gateway : avg $($pingGW.AvgMs)ms  |  Perda: $($pingGW.LossPct)%
+  Ping Internet: avg $($ping8888.AvgMs)ms  |  Perda: $($ping8888.LossPct)%  |  Download: $downloadMbps Mbps
+
 RESULTADO: $(if ($apto) { "APTO" } else { "NAO APTO" }) [$tipoMaq]
 
 ════════════════════════════════════════════════════════════
@@ -546,6 +668,25 @@ $(($adapters | ForEach-Object {
     $m = Get-AdapterSpeedMbps $_
     "  $($_.Name): $m Mbps"
 }) -join "`n")
+
+CONFIGURAÇÃO IP
+  IP Local  : $ipAddr / $ipSubnet
+  Gateway   : $ipGW
+  DNS       : $ipDNS
+
+PING GATEWAY ($ipGW) — 5 pacotes
+  Latência  : avg $($pingGW.AvgMs)ms  |  min $($pingGW.MinMs)ms  |  max $($pingGW.MaxMs)ms
+  Perda     : $($pingGW.LossPct)%  ($($pingGW.Lost)/$($pingGW.Sent))
+
+PING INTERNET (8.8.8.8) — 10 pacotes
+  Latência  : avg $($ping8888.AvgMs)ms  |  min $($ping8888.MinMs)ms  |  max $($ping8888.MaxMs)ms
+  Perda     : $($ping8888.LossPct)%  ($($ping8888.Lost)/$($ping8888.Sent))
+
+VELOCIDADE DE DOWNLOAD
+  $downloadMbps Mbps
+
+TRACERT (8.8.8.8 — máx 15 saltos)
+$tracertOut
 
 CHECKLIST
 $checklistTxt

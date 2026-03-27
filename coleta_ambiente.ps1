@@ -402,8 +402,8 @@ foreach ($a in $adapters) {
     $tipo   = if ($isWifi) { "Wireless" } else { "Cabeada" }
     $minReq = if ($isWifi) { 10 } else { $REQ_NET_MBITS }
     INF "$tipo : $($a.Name) — $mbps Mbps"
-    if ($mbps -ge $minReq) { OK  "$tipo: $mbps Mbps (mínimo $minReq Mbps)" }
-    else                   { FAIL "$tipo: $mbps Mbps insuficiente (mínimo $minReq Mbps)" }
+    if ($mbps -ge $minReq) { OK  "${tipo}: $mbps Mbps (mínimo $minReq Mbps)" }
+    else                   { FAIL "${tipo}: $mbps Mbps insuficiente (mínimo $minReq Mbps)" }
 }
 
 # ============================================================

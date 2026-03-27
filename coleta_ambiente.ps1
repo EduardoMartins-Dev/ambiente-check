@@ -14,8 +14,8 @@ Write-Host "  ║   CHECK DE AMBIENTE - MobyPharma/CRM    ║" -ForegroundColor 
 Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Tipo de máquina:" -ForegroundColor White
-Write-Host "  [1] Servidor  (até 10 micros)" -ForegroundColor Yellow
-Write-Host "  [2] Estação   (workstation)"   -ForegroundColor Yellow
+Write-Host "  [1] Servidor" -ForegroundColor Yellow
+Write-Host "  [2] Estação (workstation)" -ForegroundColor Yellow
 Write-Host ""
 
 do {
@@ -26,28 +26,101 @@ $isServer = ($choice -eq "1")
 $tipoMaq  = if ($isServer) { "SERVIDOR" } else { "ESTAÇÃO" }
 
 # ============================================================
+#  FAIXA DE USUÁRIOS (apenas servidor)
+# ============================================================
+$faixaUsuarios = ""
+if ($isServer) {
+    Write-Host ""
+    Write-Host "  Quantos usuarios usam o sistema simultaneamente?" -ForegroundColor White
+    Write-Host "  [1] Ate 10 usuarios"      -ForegroundColor Yellow
+    Write-Host "  [2] De 11 a 20 usuarios"  -ForegroundColor Yellow
+    Write-Host "  [3] De 21 a 40 usuarios"  -ForegroundColor Yellow
+    Write-Host "  [4] De 41 a 60 usuarios"  -ForegroundColor Yellow
+    Write-Host "  [5] Acima de 60 usuarios" -ForegroundColor Yellow
+    Write-Host ""
+    do {
+        $faixaChoice = Read-Host "  Digite 1, 2, 3, 4 ou 5"
+    } while ($faixaChoice -notin @("1","2","3","4","5"))
+
+    if ($faixaChoice -eq "5") {
+        Write-Host ""
+        Write-Host "  ATENCAO: Acima de 60 usuarios requer analise tecnica da Fagron Tech." -ForegroundColor Red
+        Write-Host "           Agende com o depto. Comercial antes de prosseguir." -ForegroundColor Red
+        Write-Host ""
+    }
+}
+
+# ============================================================
 #  REQUISITOS MÍNIMOS (conforme documentação MobyPharma)
 # ============================================================
 if ($isServer) {
-    $REQ_CPU_CORES  = 4
-    $REQ_CPU_GHZ    = 3.0
-    $REQ_RAM_GB     = 8
-    $REQ_DISK_GB    = 50
-    $REQ_NET_MBITS  = 100
-    $REQ_OS_OK      = @("Windows 10","Windows 11","Windows 8.1","Windows 2012","Windows 2008")
+    $REQ_OS_OK = @("Windows Server 2019","Windows Server 2016","Windows Server 2012",
+                   "Windows 10","Windows 11")
+    $REQ_DOTNET_SRV = @("2.0","3.5","4.0","4.5")
+
+    switch ($faixaChoice) {
+        "1" { # Até 10 usuários
+            $faixaUsuarios  = "Ate 10 usuarios"
+            $REQ_CPU_CORES  = 4
+            $REQ_CPU_GHZ    = 2.0
+            $REQ_RAM_GB     = 8
+            $REQ_DISK_GB    = 900    # 1 TB HD
+            $REQ_INTERNET   = 5
+            $REQ_NET_MBITS  = 100
+        }
+        "2" { # 11 a 20 usuários
+            $faixaUsuarios  = "11 a 20 usuarios"
+            $REQ_CPU_CORES  = 6
+            $REQ_CPU_GHZ    = 2.0
+            $REQ_RAM_GB     = 16
+            $REQ_DISK_GB    = 900
+            $REQ_INTERNET   = 10
+            $REQ_NET_MBITS  = 100
+        }
+        "3" { # 21 a 40 usuários
+            $faixaUsuarios  = "21 a 40 usuarios"
+            $REQ_CPU_CORES  = 12
+            $REQ_CPU_GHZ    = 2.0
+            $REQ_RAM_GB     = 32
+            $REQ_DISK_GB    = 900
+            $REQ_INTERNET   = 15
+            $REQ_NET_MBITS  = 100
+        }
+        "4" { # 41 a 60 usuários
+            $faixaUsuarios  = "41 a 60 usuarios"
+            $REQ_CPU_CORES  = 18
+            $REQ_CPU_GHZ    = 2.0
+            $REQ_RAM_GB     = 64
+            $REQ_DISK_GB    = 900
+            $REQ_INTERNET   = 30
+            $REQ_NET_MBITS  = 100
+        }
+        "5" { # Acima de 60
+            $faixaUsuarios  = "Acima de 60 usuarios (analise tecnica necessaria)"
+            $REQ_CPU_CORES  = 18
+            $REQ_CPU_GHZ    = 2.0
+            $REQ_RAM_GB     = 64
+            $REQ_DISK_GB    = 900
+            $REQ_INTERNET   = 30
+            $REQ_NET_MBITS  = 100
+        }
+    }
 } else {
+    $faixaUsuarios  = "N/A"
     $REQ_CPU_CORES  = 2
     $REQ_CPU_GHZ    = 2.0
     $REQ_RAM_GB     = 4
     $REQ_DISK_GB    = 4
+    $REQ_INTERNET   = 10
     $REQ_NET_MBITS  = 10
     $REQ_OS_OK      = @("Windows 10","Windows 11","Windows 8.1")
+    $REQ_DOTNET_SRV = @("2.0","3.5","4.5","4.6")
 }
 
-$REQ_RES_W       = 1280
-$REQ_RES_H       = 600
-$REQ_DOTNET      = @("2.0","3.5","4.5","4.6")   # 4.6 cobre 4.6.x
-$REQ_CHROME_MIN  = 83
+$REQ_RES_W      = 1280
+$REQ_RES_H      = 600
+$REQ_DOTNET     = $REQ_DOTNET_SRV
+$REQ_CHROME_MIN = 83
 
 # ============================================================
 #  SAÍDA
@@ -522,10 +595,11 @@ INF ""
 INF "── Velocidade de Internet ────────────────────"
 if ($downloadMbps -gt 0) {
     INF "Download    : $downloadMbps Mbps"
-    if    ($downloadMbps -ge 50) { OK   "Download excelente: $downloadMbps Mbps" }
-    elseif($downloadMbps -ge 20) { OK   "Download adequado: $downloadMbps Mbps" }
-    elseif($downloadMbps -ge 10) { WARN "Download no limite: $downloadMbps Mbps (mínimo 10 Mbps)" }
-    else                         { FAIL "Download insuficiente: $downloadMbps Mbps (mínimo 10 Mbps)" }
+    $dlOk = $downloadMbps -ge $REQ_INTERNET
+    if    ($downloadMbps -ge ($REQ_INTERNET * 3)) { OK   "Download excelente: $downloadMbps Mbps (mínimo $REQ_INTERNET Mbps)" }
+    elseif($downloadMbps -ge ($REQ_INTERNET * 1.5)){ OK  "Download adequado: $downloadMbps Mbps (mínimo $REQ_INTERNET Mbps)" }
+    elseif($dlOk)                                  { WARN "Download no limite: $downloadMbps Mbps (mínimo $REQ_INTERNET Mbps)" }
+    else                                           { FAIL "Download insuficiente: $downloadMbps Mbps (mínimo $REQ_INTERNET Mbps)" }
 } else {
     WARN "Não foi possível medir a velocidade de download"
 }
@@ -548,7 +622,7 @@ $checks = [ordered]@{
     "Internet acessível"     = $ping8888.Reachable
     "Sem perda de pacotes"   = ($ping8888.LossPct -eq 0)
     "Latência aceitável"     = ($ping8888.AvgMs -le 150 -and $ping8888.Reachable)
-    "Velocidade internet"    = ($downloadMbps -ge 10)
+    "Velocidade internet"    = ($downloadMbps -ge $REQ_INTERNET)
 }
 
 if ($isServer) {
@@ -581,7 +655,7 @@ Write-Host ("=" * 62) -ForegroundColor $(if ($apto) { "Green" } else { "Red" })
 $briefing = @"
 
 ════════════════════════════════════════════════════════════
- BRIEFING MobyCRM — $env:COMPUTERNAME  [$tipoMaq]
+ BRIEFING MobyCRM — $env:COMPUTERNAME  [$tipoMaq / $faixaUsuarios]
  Gerado em: $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss')
 ════════════════════════════════════════════════════════════
 

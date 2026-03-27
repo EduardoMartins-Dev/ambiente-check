@@ -38,6 +38,35 @@ function Format-Size([long]$bytes) {
     return "$bytes bytes"
 }
 
+function Get-AdapterSpeedMbps($adapter) {
+    # Método 1: ReceiveLinkSpeed / TransmitLinkSpeed (numérico em bps)
+    foreach ($prop in @("ReceiveLinkSpeed","TransmitLinkSpeed")) {
+        $bps = $adapter.$prop
+        if ($bps -and $bps -gt 0) { return [math]::Round($bps / 1000000, 0) }
+    }
+
+    # Método 2: parse da string LinkSpeed ("100 Mbps", "1 Gbps", "10 Gbps")
+    $ls = "$($adapter.LinkSpeed)".Trim()
+    if ($ls -match '(\d+\.?\d*)\s*(G|M|K)?bps') {
+        $num  = [double]$Matches[1]
+        $mbps = switch ($Matches[2]) {
+            'G' { $num * 1000 }
+            'M' { $num }
+            'K' { $num / 1000 }
+            default { $num / 1000000 }
+        }
+        if ($mbps -gt 0) { return [math]::Round($mbps, 0) }
+    }
+
+    # Método 3: WMI Win32_NetworkAdapter (fallback)
+    $wmi = Get-CimInstance Win32_NetworkAdapter -EA SilentlyContinue |
+           Where-Object { $_.Name -eq $adapter.InterfaceDescription -and $_.Speed -gt 0 } |
+           Select-Object -First 1
+    if ($wmi) { return [math]::Round($wmi.Speed / 1000000, 0) }
+
+    return 0
+}
+
 # Todos os discos fixos locais
 function Get-LocalDrives {
     Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" -EA SilentlyContinue |
@@ -280,7 +309,7 @@ if ($fcertaRoot) {
 
 Head "7. REDE"
 foreach ($a in $adapters) {
-    $mbps    = [math]::Round($a.LinkSpeed / 1MB, 0)
+    $mbps    = Get-AdapterSpeedMbps $a
     $isWifi  = $a.PhysicalMediaType -like "*802.11*" -or $a.Name -match "Wi-?Fi|Wireless"
     $tipo    = if ($isWifi) { "Wireless" } else { "Cabeada" }
     $minReq  = if ($isWifi) { 108 } else { $REQ_NET_MBITS }
@@ -302,7 +331,7 @@ $checks = @{
     "FCerta localizado"     = ($fcertaRoot -ne $null)
     "Banco de dados (.ib)"  = ($dbPath -ne "")
     "Rede suficiente"       = (($adapters | Where-Object {
-                                    $mbps = [math]::Round($_.LinkSpeed / 1MB, 0)
+                                    $mbps = Get-AdapterSpeedMbps $_
                                     $isW  = $_.PhysicalMediaType -like "*802.11*" -or $_.Name -match "Wi-?Fi|Wireless"
                                     $min  = if ($isW) { 108 } else { $REQ_NET_MBITS }
                                     $mbps -ge $min
@@ -409,7 +438,7 @@ Firebird     : $fbVer
 
 --- REDE ---
 $(($adapters | ForEach-Object {
-    $mbps = [math]::Round($_.LinkSpeed/1MB,0)
+    $mbps = Get-AdapterSpeedMbps $_
     "  $($_.Name): $mbps Mbps"
 }) -join "`n")
 

@@ -34,14 +34,14 @@ if ($isServer) {
     $REQ_RAM_GB     = 8
     $REQ_DISK_GB    = 50
     $REQ_NET_MBITS  = 100
-    $REQ_OS_OK      = @("Windows 10","Windows 8.1","Windows 2012","Windows 2008")
+    $REQ_OS_OK      = @("Windows 10","Windows 11","Windows 8.1","Windows 2012","Windows 2008")
 } else {
-    $REQ_CPU_CORES  = 2      # sem exigência de núcleos mínimos, só GHz
+    $REQ_CPU_CORES  = 2
     $REQ_CPU_GHZ    = 2.0
     $REQ_RAM_GB     = 4
     $REQ_DISK_GB    = 4
     $REQ_NET_MBITS  = 10
-    $REQ_OS_OK      = @("Windows 10","Windows 8.1")
+    $REQ_OS_OK      = @("Windows 10","Windows 11","Windows 8.1")
 }
 
 $REQ_RES_W       = 1280
@@ -252,7 +252,9 @@ $cpu         = Get-CimInstance Win32_Processor | Select-Object -First 1
 $cpuName     = $cpu.Name.Trim()
 $cpuCores    = $cpu.NumberOfCores
 $cpuLogic    = $cpu.NumberOfLogicalProcessors
-$cpuGHz      = [math]::Round($cpu.MaxClockSpeed / 1000, 2)
+# MaxClockSpeed = clock base (pode ser baixo em chips low-power como i7-14700T).
+# Usamos o maior entre MaxClockSpeed e CurrentClockSpeed para refletir melhor a capacidade real.
+$cpuGHz      = [math]::Round([math]::Max($cpu.MaxClockSpeed, $cpu.CurrentClockSpeed) / 1000, 2)
 
 $ramTotalGB  = [math]::Round(($os.TotalVisibleMemorySize * 1KB) / 1GB, 1)
 $ramFreeGB   = [math]::Round(($os.FreePhysicalMemory  * 1KB) / 1GB, 1)
@@ -288,6 +290,15 @@ $resOk = $false
 foreach ($g in $gpus) {
     if ($g.CurrentHorizontalResolution -ge $REQ_RES_W -and
         $g.CurrentVerticalResolution   -ge $REQ_RES_H) { $resOk = $true; break }
+}
+
+# Rede - pré-computa antes do hashtable para evitar problema de escopo
+$redeOk = $false
+foreach ($a in $adapters) {
+    $m   = Get-AdapterSpeedMbps $a
+    $isW = $a.PhysicalMediaType -like "*802.11*" -or $a.Name -match "Wi-?Fi|Wireless"
+    $min = if ($isW) { 10 } else { $REQ_NET_MBITS }
+    if ($m -ge $min) { $redeOk = $true; break }
 }
 
 # Chrome versão
@@ -420,11 +431,7 @@ $checks = [ordered]@{
     "Firebird instalado"     = ($fbVer -ne "")
     "FCerta localizado"      = ($null -ne $fcertaRoot)
     "Banco de dados (.ib)"   = ($dbPath -ne "")
-    "Rede suficiente"        = (($adapters | Where-Object {
-                                    $m = Get-AdapterSpeedMbps $_
-                                    $w = $_.PhysicalMediaType -like "*802.11*" -or $_.Name -match "Wi-?Fi|Wireless"
-                                    $m -ge (if ($w) { 10 } else { $REQ_NET_MBITS })
-                                }).Count -gt 0)
+    "Rede suficiente"        = $redeOk
 }
 
 if ($isServer) {

@@ -6,13 +6,22 @@ Script PowerShell para coleta e validação de ambiente para implantação do **
 
 ## Como usar
 
-Cole o comando abaixo no **PowerShell** da máquina do cliente:
+### Opção 1 — Remoto (via internet)
+
+Cole no **PowerShell como Administrador**:
 
 ```powershell
-irm "https://raw.githubusercontent.com/EduardoMartins-Dev/ambiente-check/main/coleta_ambiente.ps1" | iex
+[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; irm "https://raw.githubusercontent.com/EduardoMartins-Dev/ambiente-check/main/coleta_ambiente.ps1" | iex
 ```
 
 > Não é necessário baixar nenhum arquivo. O script roda direto na memória.
+
+### Opção 2 — Pendrive (offline)
+
+Para máquinas com problemas de TLS/certificados ou sem internet:
+
+1. Copie `coleta_ambiente.ps1` e `rodar.bat` para o pendrive
+2. Na máquina do cliente, dê **duplo clique** no `rodar.bat`
 
 ---
 

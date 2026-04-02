@@ -5,6 +5,13 @@
 
 $ErrorActionPreference = "SilentlyContinue"
 
+# Fix TLS 1.2 + certificados (máquinas com Windows/certificados desatualizados)
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Add-Type 'using System.Net;using System.Security.Cryptography.X509Certificates;public class TrustAll:ICertificatePolicy{public bool CheckValidationResult(ServicePoint s,X509Certificate c,WebRequest r,int p){return true;}}' -EA SilentlyContinue
+    [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAll
+} catch {}
+
 # ============================================================
 #  SELEÇÃO: SERVIDOR OU ESTAÇÃO
 # ============================================================
